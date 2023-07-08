@@ -18,6 +18,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+	
+	/* versions of mvwprintw() and wprintw() that print at nost size characters
+	   and truncate output */
 
 	extern int mvwnprintw(WINDOW *win, int y, int x, size_t size, const char *fmt, ...);
 	extern int wnprintw(WINDOW *win, size_t size, const char *fmt, ...);
@@ -25,6 +28,22 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
+inline int getnrows(WINDOW *win)
+{
+        int rows, cols;
+        getmaxyx(win, rows, cols);
+        (void)cols;
+        return rows;
+}
+
+inline int getncols(WINDOW *win)
+{
+        int rows, cols;
+        getmaxyx(win, rows, cols);
+        (void)rows;
+        return cols;
+}
 
 #endif /* __MY_NCURSES_H */
 

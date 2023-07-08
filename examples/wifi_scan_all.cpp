@@ -32,6 +32,9 @@
  *
  * Added pthreads to avoid blocking and delays in processing SIGWINCH
 
+ * 2023-07-08 0.07.00 moved to GitHub
+ *	              moved getncols(), getnrows() to my_ncurses.h
+
  * 2023-06-17
  *	      0.05.00 convert windows to c++ objects
  *	      0.04.02 decrease startline in wifiarea when enlarging window
@@ -145,9 +148,6 @@ class rfbar_window *wrfbar = NULL;
 int BSS_INFOS=INIT_BSS_INFOS; //the maximum amounts of APs (Access Points) we want to store
 static sigset_t sigwinch_set;
 
-inline int getnrows(WINDOW *win);
-inline int getncols(WINDOW *win);
-
 void smart_window::resize(void) {
 	struct winsize ws;
 
@@ -235,22 +235,6 @@ void smart_window::resize(void) {
 	wrfbar  = new rfbar_window(winrfbar);
 }
 */
-
-inline int getnrows(WINDOW *win)
-{
-	int rows, cols;
-	getmaxyx(win, rows, cols);
-	(void)cols;
-	return rows;
-}
-
-inline int getncols(WINDOW *win)
-{
-	int rows, cols;
-	getmaxyx(win, rows, cols);
-	(void)rows;
-	return cols;
-}
 
 int sort_key = 'c';
 bool ascending = true;

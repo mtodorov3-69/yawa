@@ -1,0 +1,12 @@
+
+2023-06-17
+	- sometimes after resizing terminal to zero lines the wintext and wi-fi
+	  list do not recover and remain empty
+
+2023-06-17 17:00
+	- after changing perform_sorting, wifi signal bars are sometimes broken.
+
+2023-06-17 15:40
+	- after resizing window, key arrow down takes ages to respond (FIXME: found WORKAROUND).
+		(appears to have something to do with the atomic read/writes and threads?)
+
