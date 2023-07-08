@@ -76,7 +76,8 @@ WINDOW *wintext = NULL, *wingraph = NULL, *winwifiarea = NULL, *winrfbar = NULL;
 static bool rotating_bar = true;
 int stdscr_lines, stdscr_columns, graph_lines, graph_columns, text_lines, text_columns;
 int  winstart = 0;
-volatile int status, i;
+volatile int status = 0, i;
+volatile int global_status = 0;
 
 class smart_window {
 	friend class screen_window;
@@ -87,7 +88,7 @@ protected:
 public:
 	smart_window() { window = NULL; parent = NULL; }
 	smart_window(WINDOW *w) { window = w; dirty = true; }
-	virtual ~smart_window() { delwin(window); }
+	virtual ~smart_window() { delwin(window);  window = NULL; }
 	virtual void repaint(void) = 0;
 	virtual void touch(void) { dirty = true; }
 	void resize(void);
@@ -153,7 +154,7 @@ void smart_window::resize(void) {
 	getmaxyx(stdscr, stdscr_lines, stdscr_columns);
 	// if (winwifiarea)
 	// 	delwin(winwifiarea);
-	delete wrfbar;
+	// delete wrfbar;
 	// delete wtext;
 	winstart = stdscr_lines - WIFI_NCHAN - 4;
 	if (winstart < 0)
@@ -170,6 +171,8 @@ void smart_window::resize(void) {
 		winwifiarea = derwin(wintext, winstart - 4 ? winstart - 4 : 0, stdscr_columns - 4, 3, 2);
 		// mvwin(winwifiarea, 3, 2);
 	}
+	if (winrfbar)
+		delwin(winrfbar);
 	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
 	// wresize(winrfbar, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4);
 	/*
@@ -240,6 +243,7 @@ void Usage(char **argv);
 
 struct wifi_scan *wifi=NULL;    //this stores all the library information
 struct bss_info  *bss = NULL; //this is where we are going to keep informatoin about APs (Access Points)
+struct bss_info  *bss_new = NULL;
 char mac[BSSID_STRING_LENGTH];  //a placeholder where we convert BSSID to printable hardware mac address
 char mac2[BSSID_STRING_LENGTH];  //a placeholder where we convert BSSID to printable hardware mac address
 
@@ -274,7 +278,7 @@ void reinitialise_windows()
 	winwifiarea = derwin(wintext, winstart - 4, stdscr_columns - 4, 3, 2);
 	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
 	int nrwifi = getnrows(winwifiarea);
-	if (status < nrwifi)
+	if (READ_ONCE(global_status) < nrwifi)
 		startline = 0;
 	else if (startline > status - nrwifi)
 		startline = status - nrwifi;
@@ -310,7 +314,8 @@ char *bssid_to_string(const uint8_t bssid[BSSID_LENGTH], char bssid_string[BSSID
 void initialise()
 {
 	//this is where we are going to keep informatoin about APs (Access Points)
-	bss = (struct bss_info*) malloc (sizeof (struct bss_info) * BSS_INFOS);
+	bss     = (struct bss_info*) calloc (sizeof (struct bss_info), 2 * BSS_INFOS);
+	bss_new = (struct bss_info*) calloc (sizeof (struct bss_info), BSS_INFOS);
 
 	sigemptyset(&sigwinch_set);
 	sigaddset(&sigwinch_set, SIGWINCH);
@@ -377,7 +382,7 @@ void text_window::wifiarea_update (WINDOW *winwifiarea)
 	int colourpair, wifipc, chan;
 	// int nrwifi = getnrows(winwifiarea), ncwifi = getncols(winwifiarea);
 	int nrwifi = getnrows(wtext->window) - 4, ncwifi = getncols(wtext->window);
-	int repaint_end = MIN(status, BSS_INFOS);
+	int repaint_end = MIN(READ_ONCE(global_status), BSS_INFOS);
 
 	// getmaxyx(winwifiarea, nrwifi, ncwifi);
 
@@ -440,7 +445,7 @@ void text_window::repaint(void)
 
 	//wifi_scan_all returns the number of found stations, it may be greater than BSS_INFOS that's why we test for both in the loop
 	wclear(window);
-	wnprintw(window, nc - 2, "\n  n APs=%d SK=%c.%c %dx%d (%dx%d)\n", status, (char)sort_key, ascending ? 'a' : 'd', nr, nc, nrwifi, ncwifi);
+	wnprintw(window, nc - 2, "\n  n APs=%d SK=%c.%c %dx%d (%dx%d)\n", READ_ONCE(global_status), (char)sort_key, ascending ? 'a' : 'd', nr, nc, nrwifi, ncwifi);
 	wnprintw(window, nc - 2, "  %2s %17s %20.20s    %s  frequency  channel    seen ms ago   status  vendor\n",
 				"N", "MAC", "SSID", "signal");
 	wifiarea_update(winwifiarea);
@@ -529,6 +534,8 @@ void graph_window::repaint(void)
 volatile bool sorted = false;
 
 void init_stats(void) {
+	int status = READ_ONCE(global_status);
+
 	for (unsigned i = 0; i <= WIFI_NCHAN; i ++) {
 		wifis_per_chan[i] = 0;
 		for (int j = 0; j < MAX_PER_CHAN; j++) {
@@ -548,6 +555,7 @@ void init_stats(void) {
 
 int perform_sorting() {
 	int i, j;
+	int status = READ_ONCE(global_status);
 
 	if (READ_ONCE(sorted))
 		return sort_key; // nothing to do
@@ -587,8 +595,32 @@ int perform_sorting() {
 	return sort_key;
 }
 
+int merge_arrays (struct bss_info *bss_old, int n_old, struct bss_info *bss_new, int n_new)
+{
+	int last_old = n_old;
+	bool already_present = false;
+
+	for (int i = 0; i < n_new; i++) {
+		already_present = false;
+		for (int j = 0; j < n_old; j++) {
+			if (bss_new[i].frequency == bss_old[j].frequency &&
+			    memcmp (bss_new[i].bssid, bss_old[j].bssid, BSSID_LENGTH) == 0 &&
+			    strncmp(bss_new[i].ssid,  bss_old[j].ssid,  SSID_MAX_LENGTH_WITH_NULL) == 0) {
+				already_present = true;
+				bss_old[j] = bss_new[i];
+				break;
+			}
+		}
+		if (!already_present)
+			bss_old[last_old ++] = bss_new[i];
+	}
+
+	return last_old;
+}
+
 int process_keypress_event() {
 	int c;
+	int status = READ_ONCE(global_status);
 
 	if ((c = getch()) != ERR) {
 		if (c == sort_key && strchr("csmiv", c)) {
@@ -639,21 +671,33 @@ volatile bool first_scan_passed = false;
 
 void *wifi_scan_thread(void *arg)
 {
+	int last_status = 0;
+
 	while (1)
 	{
+		int prev_status = READ_ONCE(global_status);
+
 		SET_ONCE(RF_scanning);
-		status = wifi_scan_all(wifi, bss, BSS_INFOS);
+		last_status = wifi_scan_all(wifi, bss_new, BSS_INFOS);
 		if (!first_scan_passed)	{
 			SET_ONCE(first_scan_passed);
 			pthread_mutex_unlock(&first_scan_mutex);
 		}
-		if (status >= BSS_INFOS) {
+		if (last_status == -1) {
+			// failed scan, nothing useful to do ATM
+			goto out;
+		} else if (last_status >= BSS_INFOS) {
+			// extend the buffer as needed: we miss at most one scan's extra data
 			int new_status = BSS_INFOS;
-			BSS_INFOS = status;
-			bss = (struct bss_info*) realloc (bss, sizeof (struct bss_info) * BSS_INFOS);
-			status = new_status;
+			BSS_INFOS = last_status + 32;
+			bss_new = (struct bss_info*) realloc (bss_new, sizeof (struct bss_info) * BSS_INFOS);
+			last_status = new_status; // read old data as still valid
 		}
+
+		last_status = merge_arrays(bss, prev_status, bss_new, last_status);
 		CLEAR_ONCE(sorted);
+		WRITE_ONCE(global_status, last_status);
+out:
 		WRITE_ONCE(scanner_dots, 0);
 		CLEAR_ONCE(RF_scanning);
 		usleep(500000);
@@ -821,13 +865,13 @@ int main(int argc, char **argv)
 			} while (READ_ONCE(RF_scanning));
 			//it may happen that device is unreachable (e.g. the device works in such way that it doesn't respond while scanning)
 			//you may test for errno==EBUSY here and make a retry after a while, this is how my hardware works for example
-			if (status < 0)
-				perror("Unable to get scan data");
-			else {
+			// if (status < 0)
+				// perror("Unable to get scan data");
+			// else {
 				perform_sorting();
 				// wifiarea_update(winwifiarea);
 				wscreen->repaint();
-			}
+			// }
 		} else
 			usleep(200000);
 
