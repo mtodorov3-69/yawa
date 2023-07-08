@@ -60,13 +60,7 @@
 #include "../wifi_chan.h"
 #include "../get_mac_table.h"
 #include "../my_ncurses.h"
-
-#define READ_ONCE(X) __atomic_load_n(&(X), __ATOMIC_SEQ_CST)
-#define WRITE_ONCE(X, VAL) __atomic_store_n(&(X), (VAL), __ATOMIC_SEQ_CST)
-#define SET_ONCE(X) __atomic_test_and_set(&(X), __ATOMIC_SEQ_CST)
-#define CLEAR_ONCE(X) __atomic_clear(&(X), __ATOMIC_SEQ_CST)
-#define INCR_ONCE(X) __atomic_add_fetch(&(X), 1, __ATOMIC_SEQ_CST)
-#define DECR_ONCE(X) __atomic_sub_fetch(&(X), 1, __ATOMIC_SEQ_CST)
+#include "../rwonce.h"
 
 #define swapxy(X,Y) ({ typeof(X) tmp = (X); (X) = (Y); (Y) = tmp; })
 
@@ -164,12 +158,15 @@ void smart_window::resize(void) {
 	winstart = stdscr_lines - WIFI_NCHAN - 4;
 	if (winstart < 0)
 		winstart = 0;
-	wresize(wintext, winstart, stdscr_columns);
 	if (winstart > 5) {
+		wresize(wintext, winstart, stdscr_columns);
 		wresize(winwifiarea, winstart > 4 ? winstart - 4 : 0, stdscr_columns - 4);
 	} else {
+		if (wintext)
+			delwin(wintext);
 		if (winwifiarea)
 			delwin(winwifiarea);
+		wintext     = newwin(winstart, stdscr_columns, 0, 0);
 		winwifiarea = derwin(wintext, winstart - 4 ? winstart - 4 : 0, stdscr_columns - 4, 3, 2);
 		// mvwin(winwifiarea, 3, 2);
 	}
@@ -182,7 +179,7 @@ void smart_window::resize(void) {
 	else if (startline > status - nrwifi)
 		startline = status - nrwifi;
 	*/
- 	wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
+ 	// wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
 	delete wgraph;
 	wingraph = newwin(stdscr_lines - winstart > 0 ? stdscr_lines - winstart : 0, stdscr_columns, winstart, 0);
 	wborder(wingraph, 0, 0, 0, 0, 0, 0, 0, 0);
