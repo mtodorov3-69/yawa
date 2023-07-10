@@ -53,6 +53,7 @@
 #include <unistd.h> //sleep
 #include <ncurses.h>
 #include <signal.h>
+#include <math.h>
 #include <pthread.h>
 #include <sys/select.h>
 #include <sys/ioctl.h>
@@ -301,6 +302,7 @@ void resizeHandler(int sig)
 int wifis_per_chan[WIFI_NCHAN + 1];
 int power_per_chan[WIFI_NCHAN + 1][MAX_PER_CHAN];
 int index_per_chan[WIFI_NCHAN + 1][MAX_PER_CHAN];
+double congestion_per_chan[WIFI_NCHAN + 1];
 
 //convert bssid to printable hardware mac address
 char *bssid_to_string(const uint8_t bssid[BSSID_LENGTH], char bssid_string[BSSID_STRING_LENGTH])
@@ -477,6 +479,7 @@ void graph_window::repaint(void)
 		mvwprintw(window, 1, 30 + j - 1 + (j == 100), "%d", -100 + j);
 	}
 	mvwprintw(window, 1, 1, "%4s=%2d,%2d %10.10s  %s %3s  %s", "CH", (int)WIFI_NCHAN, getnrows(window), "SSID", "N", "dBm", "Signal strength");
+	mvwprintw(window, 1, 132, "%s", "Congestion");
 
 	for (unsigned int line = 1; line <= WIFI_NCHAN; ++line) {
 		int wline = line + 2; // offset for the header
@@ -526,6 +529,23 @@ void graph_window::repaint(void)
 		}
 
 	}
+	// color_mode = false;
+	for (unsigned int line = 1; line <= WIFI_NCHAN; ++line) {
+		int wline = line + 2; // offset for the header
+		switch (wifis_per_chan[line]) {
+		case 1:
+			colourpair = 1; break;
+		case 2:
+			colourpair = 2; break;
+		default:
+			colourpair = 3; break;
+		}
+
+		for (int j = 1; j <= 100 + (100 + congestion_per_chan[line])/3 - 100; j ++) {
+			mvwaddch(window, wline, j + 130, '!' | (color_mode ? COLOR_PAIR(colourpair) : 0 ) | A_BOLD);
+		}
+	}
+	// color_mode = true;
 	wrefresh(window);
 
 	dirty = false;
@@ -538,6 +558,7 @@ void init_stats(void) {
 
 	for (unsigned i = 0; i <= WIFI_NCHAN; i ++) {
 		wifis_per_chan[i] = 0;
+		congestion_per_chan[i] = 0;
 		for (int j = 0; j < MAX_PER_CHAN; j++) {
 			power_per_chan[i][j] = 0;
 			index_per_chan[i][j] = 0;
@@ -551,6 +572,13 @@ void init_stats(void) {
 		++ wifis_per_chan[line];
 		// index_per_chan[line][0] = i;
 	}
+
+	for (unsigned int line = 1; line <= WIFI_NCHAN; line ++) {
+		for (i = 0; i < wifis_per_chan[line]; i ++)
+			congestion_per_chan[line] += exp10(power_per_chan[line][i] / 10);
+		congestion_per_chan[line] = 10 * log10(congestion_per_chan[line]);
+	}
+
 }
 
 int perform_sorting() {

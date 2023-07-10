@@ -5,7 +5,7 @@ CXX = g++
 DEBUG =
 CFLAGS = -O2 -g -Wall -c $(DEBUG)
 CXX_FLAGS = -O2 -std=c++11 -Wall -c $(DEBUG)
-LDLIBS = -lmnl -lncurses
+LDLIBS = -lmnl -lncurses -lm
 
 wifi_scan.o : wifi_scan.h wifi_scan.c
 	$(CC) $(CFLAGS) wifi_scan.c
