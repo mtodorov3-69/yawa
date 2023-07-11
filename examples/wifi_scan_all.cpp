@@ -80,6 +80,8 @@ int  winstart = 0;
 volatile int status = 0, i;
 volatile int global_status = 0;
 
+pthread_mutex_t bss_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 class smart_window {
 	friend class screen_window;
 protected:
@@ -144,10 +146,11 @@ class rfbar_window *wrfbar = NULL;
 int BSS_INFOS=INIT_BSS_INFOS; //the maximum amounts of APs (Access Points) we want to store
 static sigset_t sigwinch_set;
 
+/*
 void smart_window::resize(void) {
 	struct winsize ws;
 
-	/* get terminal size the safe way */
+	// get terminal size the safe way
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1)
 		perror("ioctl");
 
@@ -176,13 +179,11 @@ void smart_window::resize(void) {
 		delwin(winrfbar);
 	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
 	// wresize(winrfbar, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4);
-	/*
 	int nrwifi = getnrows(winwifiarea);
 	if (status < nrwifi || nrwifi == 0)
 		startline = 0;
 	else if (startline > status - nrwifi)
 		startline = status - nrwifi;
-	*/
  	// wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
 	delete wgraph;
 	wingraph = newwin(stdscr_lines - winstart > 0 ? stdscr_lines - winstart : 0, stdscr_columns, winstart, 0);
@@ -196,8 +197,52 @@ void smart_window::resize(void) {
 	wscreen->add_child(wgraph);
 	wrfbar  = new rfbar_window(winrfbar);
 }
+*/
 
 /*
+void smart_window::resize(void)
+{
+	struct winsize ws;
+
+	// get terminal size the safe way
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1)
+		perror("ioctl");
+
+	resizeterm(ws.ws_row, ws.ws_col);
+	getmaxyx(stdscr, stdscr_lines, stdscr_columns);
+	if (winwifiarea)
+		delwin(winwifiarea);
+	if (winrfbar)
+		delwin(winrfbar);
+	if (wintext)
+		delwin(wintext);
+	winstart = stdscr_lines - WIFI_NCHAN - 4;
+	if (winstart < 0)
+		winstart = 0;
+	wintext = newwin(winstart, stdscr_columns, 0, 0);
+	winwifiarea = derwin(wintext, winstart - 4, stdscr_columns - 4, 3, 2);
+	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
+	int nrwifi = getnrows(winwifiarea);
+	if (READ_ONCE(global_status) < nrwifi)
+		startline = 0;
+	else if (startline > status - nrwifi)
+		startline = status - nrwifi;
+ 	wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
+	if (wingraph)
+		delwin(wingraph);
+	wingraph = newwin(stdscr_lines - winstart > 0 ? stdscr_lines - winstart : 0, stdscr_columns, winstart, 0);
+	wborder(wingraph, 0, 0, 0, 0, 0, 0, 0, 0);
+	wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
+
+	wscreen = new screen_window(stdscr);
+	wtext   = new text_window (wintext);
+	wgraph  = new graph_window(wingraph);
+	wscreen->add_child(wtext);
+	wscreen->add_child(wgraph);
+	wrfbar  = new rfbar_window(winrfbar);
+}
+*/
+
 void smart_window::resize(void) {
 	struct winsize ws;
 
@@ -235,7 +280,6 @@ void smart_window::resize(void) {
 	wscreen->add_child(wgraph);
 	wrfbar  = new rfbar_window(winrfbar);
 }
-*/
 
 int sort_key = 'c';
 bool ascending = true;
@@ -316,7 +360,9 @@ char *bssid_to_string(const uint8_t bssid[BSSID_LENGTH], char bssid_string[BSSID
 void initialise()
 {
 	//this is where we are going to keep informatoin about APs (Access Points)
+	pthread_mutex_lock(&bss_mutex);
 	bss     = (struct bss_info*) calloc (sizeof (struct bss_info), 2 * BSS_INFOS);
+	pthread_mutex_unlock(&bss_mutex);
 	bss_new = (struct bss_info*) calloc (sizeof (struct bss_info), BSS_INFOS);
 
 	sigemptyset(&sigwinch_set);
@@ -388,6 +434,7 @@ void text_window::wifiarea_update (WINDOW *winwifiarea)
 
 	// getmaxyx(winwifiarea, nrwifi, ncwifi);
 
+	pthread_mutex_lock(&bss_mutex);
 	for (int i = 0; i < repaint_end; i++) {
 		bool flip = i - startline > nrwifi;
 
@@ -419,6 +466,7 @@ void text_window::wifiarea_update (WINDOW *winwifiarea)
 		waddch(winwifiarea, '\n');
 		wattroff(winwifiarea, ( color_mode ? COLOR_PAIR(colourpair + 3) : 0 ) | A_BOLD);
 	}
+	pthread_mutex_unlock(&bss_mutex);
 }
 
 void text_window::wifiarea_repaint (WINDOW *winwifiarea)
@@ -481,6 +529,7 @@ void graph_window::repaint(void)
 	mvwprintw(window, 1, 1, "%4s=%2d,%2d %10.10s  %s %3s  %s", "CH", (int)WIFI_NCHAN, getnrows(window), "SSID", "N", "dBm", "Signal strength");
 	mvwprintw(window, 1, 132, "%s", "Congestion");
 
+	pthread_mutex_lock(&bss_mutex);
 	for (unsigned int line = 1; line <= WIFI_NCHAN; ++line) {
 		int wline = line + 2; // offset for the header
 		if (wline > getnrows(window) - 2)
@@ -529,6 +578,7 @@ void graph_window::repaint(void)
 		}
 
 	}
+	pthread_mutex_unlock(&bss_mutex);
 	// color_mode = false;
 	for (unsigned int line = 1; line <= WIFI_NCHAN; ++line) {
 		int wline = line + 2; // offset for the header
@@ -588,6 +638,7 @@ int perform_sorting() {
 	if (READ_ONCE(sorted))
 		return sort_key; // nothing to do
 
+	pthread_mutex_lock(&bss_mutex);
 	for (i = 0; i < status; i++)
 		for (j = i + 1; j < status; j ++)
 			if      (sort_key == 'c' &&  ascending && (bss[i].frequency >  bss[j].frequency ||
@@ -614,6 +665,7 @@ int perform_sorting() {
 				swapxy(bss[i], bss[j]);
 
 	init_stats();
+	pthread_mutex_unlock(&bss_mutex);
 
 	wtext->touch();
 	wgraph->touch();
@@ -722,7 +774,10 @@ void *wifi_scan_thread(void *arg)
 			last_status = new_status; // read old data as still valid
 		}
 
+		pthread_mutex_lock(&bss_mutex);
 		last_status = merge_arrays(bss, prev_status, bss_new, last_status);
+		pthread_mutex_unlock(&bss_mutex);
+
 		CLEAR_ONCE(sorted);
 		WRITE_ONCE(global_status, last_status);
 out:
