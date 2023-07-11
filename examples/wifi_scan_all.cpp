@@ -262,7 +262,7 @@ void smart_window::resize(void) {
 		winstart = 0;
 	wintext = newwin(winstart, stdscr_columns, 0, 0);
 	winwifiarea = derwin(wintext, winstart - 4, stdscr_columns - 4, 3, 2);
-	winrfbar = subpad(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
+	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
 	int nrwifi = getnrows(winwifiarea);
 	if (status < nrwifi)
 		startline = 0;
@@ -294,7 +294,7 @@ char mac[BSSID_STRING_LENGTH];  //a placeholder where we convert BSSID to printa
 char mac2[BSSID_STRING_LENGTH];  //a placeholder where we convert BSSID to printable hardware mac address
 
 volatile bool RF_scanning = false;
-volatile bool RF_scan_progress = false;
+volatile bool RF_scan_progress = true;
 volatile int scanner_dots = 0;
 bool initial_screen = true;
 bool color_mode = false;
@@ -431,6 +431,7 @@ void text_window::wifiarea_update (WINDOW *winwifiarea)
 
 	// getmaxyx(winwifiarea, nrwifi, ncwifi);
 
+	pthread_mutex_lock(&bss_mutex);
 	for (int i = 0; i < repaint_end; i++) {
 		bool flip = i - startline > nrwifi;
 
@@ -462,6 +463,7 @@ void text_window::wifiarea_update (WINDOW *winwifiarea)
 		waddch(winwifiarea, '\n');
 		wattroff(winwifiarea, ( color_mode ? COLOR_PAIR(colourpair + 3) : 0 ) | A_BOLD);
 	}
+	pthread_mutex_unlock(&bss_mutex);
 }
 
 void text_window::wifiarea_repaint (WINDOW *winwifiarea)
@@ -524,6 +526,7 @@ void graph_window::repaint(void)
 	mvwprintw(window, 1, 1, "%4s=%2d,%2d %10.10s  %s %3s  %s", "CH", (int)WIFI_NCHAN, getnrows(window), "SSID", "N", "dBm", "Signal strength");
 	mvwprintw(window, 1, 132, "%s", "Congestion");
 
+	pthread_mutex_lock(&bss_mutex);
 	for (unsigned int line = 1; line <= WIFI_NCHAN; ++line) {
 		int wline = line + 2; // offset for the header
 		if (wline > getnrows(window) - 2)
@@ -589,6 +592,7 @@ void graph_window::repaint(void)
 		}
 	}
 	// color_mode = true;
+	pthread_mutex_unlock(&bss_mutex);
 	wrefresh(window);
 
 	dirty = false;
@@ -631,6 +635,7 @@ int perform_sorting() {
 	if (READ_ONCE(sorted))
 		return sort_key; // nothing to do
 
+	pthread_mutex_lock(&bss_mutex);
 	for (i = 0; i < status; i++)
 		for (j = i + 1; j < status; j ++)
 			if      (sort_key == 'c' &&  ascending && (bss[i].frequency >  bss[j].frequency ||
@@ -657,6 +662,7 @@ int perform_sorting() {
 				swapxy(bss[i], bss[j]);
 
 	init_stats();
+	pthread_mutex_unlock(&bss_mutex);
 
 	wtext->touch();
 	wgraph->touch();
