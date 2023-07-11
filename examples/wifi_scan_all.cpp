@@ -64,6 +64,7 @@
 #include "../rwonce.h"
 
 #define swapxy(X,Y) ({ typeof(X) tmp = (X); (X) = (Y); (Y) = tmp; })
+#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
 
 #define INIT_BSS_INFOS 1024
 
@@ -79,6 +80,8 @@ int stdscr_lines, stdscr_columns, graph_lines, graph_columns, text_lines, text_c
 int  winstart = 0;
 volatile int status = 0, i;
 volatile int global_status = 0;
+
+pthread_mutex_t bss_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 class smart_window {
 	friend class screen_window;
@@ -144,10 +147,11 @@ class rfbar_window *wrfbar = NULL;
 int BSS_INFOS=INIT_BSS_INFOS; //the maximum amounts of APs (Access Points) we want to store
 static sigset_t sigwinch_set;
 
+/*
 void smart_window::resize(void) {
 	struct winsize ws;
 
-	/* get terminal size the safe way */
+	// get terminal size the safe way
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1)
 		perror("ioctl");
 
@@ -176,13 +180,11 @@ void smart_window::resize(void) {
 		delwin(winrfbar);
 	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
 	// wresize(winrfbar, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4);
-	/*
 	int nrwifi = getnrows(winwifiarea);
 	if (status < nrwifi || nrwifi == 0)
 		startline = 0;
 	else if (startline > status - nrwifi)
 		startline = status - nrwifi;
-	*/
  	// wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
 	delete wgraph;
 	wingraph = newwin(stdscr_lines - winstart > 0 ? stdscr_lines - winstart : 0, stdscr_columns, winstart, 0);
@@ -196,8 +198,52 @@ void smart_window::resize(void) {
 	wscreen->add_child(wgraph);
 	wrfbar  = new rfbar_window(winrfbar);
 }
+*/
 
 /*
+void smart_window::resize(void)
+{
+	struct winsize ws;
+
+	// get terminal size the safe way
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1)
+		perror("ioctl");
+
+	resizeterm(ws.ws_row, ws.ws_col);
+	getmaxyx(stdscr, stdscr_lines, stdscr_columns);
+	if (winwifiarea)
+		delwin(winwifiarea);
+	if (winrfbar)
+		delwin(winrfbar);
+	if (wintext)
+		delwin(wintext);
+	winstart = stdscr_lines - WIFI_NCHAN - 4;
+	if (winstart < 0)
+		winstart = 0;
+	wintext = newwin(winstart, stdscr_columns, 0, 0);
+	winwifiarea = derwin(wintext, winstart - 4, stdscr_columns - 4, 3, 2);
+	winrfbar = derwin(wintext, 1, (stdscr_columns > WIFI_BAR_LENGTH ? WIFI_BAR_LENGTH : stdscr_columns) - 4, winstart - 1, 3);
+	int nrwifi = getnrows(winwifiarea);
+	if (READ_ONCE(global_status) < nrwifi)
+		startline = 0;
+	else if (startline > status - nrwifi)
+		startline = status - nrwifi;
+ 	wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
+	if (wingraph)
+		delwin(wingraph);
+	wingraph = newwin(stdscr_lines - winstart > 0 ? stdscr_lines - winstart : 0, stdscr_columns, winstart, 0);
+	wborder(wingraph, 0, 0, 0, 0, 0, 0, 0, 0);
+	wborder(wintext, 0, 0, 0, 0, 0, 0, 0, 0);
+
+	wscreen = new screen_window(stdscr);
+	wtext   = new text_window (wintext);
+	wgraph  = new graph_window(wingraph);
+	wscreen->add_child(wtext);
+	wscreen->add_child(wgraph);
+	wrfbar  = new rfbar_window(winrfbar);
+}
+*/
+
 void smart_window::resize(void) {
 	struct winsize ws;
 
@@ -235,7 +281,6 @@ void smart_window::resize(void) {
 	wscreen->add_child(wgraph);
 	wrfbar  = new rfbar_window(winrfbar);
 }
-*/
 
 int sort_key = 'c';
 bool ascending = true;
@@ -376,8 +421,6 @@ void rfbar_window::repaint (void)
 }
 
 int oldstartline = startline;
-
-#define MIN(X,Y) ((X) < (Y) ? (X) : (Y))
 
 void text_window::wifiarea_update (WINDOW *winwifiarea)
 {
@@ -722,7 +765,10 @@ void *wifi_scan_thread(void *arg)
 			last_status = new_status; // read old data as still valid
 		}
 
+		pthread_mutex_lock(&bss_mutex);
 		last_status = merge_arrays(bss, prev_status, bss_new, last_status);
+		pthread_mutex_unlock(&bss_mutex);
+
 		CLEAR_ONCE(sorted);
 		WRITE_ONCE(global_status, last_status);
 out:
