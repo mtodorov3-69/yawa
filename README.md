@@ -13,6 +13,8 @@ provided with ifconfig -a or other command.
 NOTE: the MAC vendor database is official and new versions can be downloaded from
 the source: https://maclookup.app/downloads/csv-database
 
+NOTE: Use of this software may be restricted or banned in some countries.
+
 DISCLAIMER
 
 Based on the open-source wifi-scan library Copyright (C) 2016 Bartosz Meglicki <meglickib@gmail.com>
